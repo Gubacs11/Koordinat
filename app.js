@@ -219,18 +219,17 @@ function draw2D(width, height) {
 }
 
 function project3D(point, width, height, scale) {
-  const cy = Math.cos(state.yaw), sy = Math.sin(state.yaw);
-  const cp = Math.cos(state.pitch), sp = Math.sin(state.pitch);
-  const x1 = point.x * cy - point.y * sy;
-  const y1 = point.x * sy + point.y * cy;
-  const z1 = point.z;
-  const y2 = y1 * cp - z1 * sp;
-  const z2 = y1 * sp + z1 * cp;
-  const perspective = 1 / (1 + y2 * .014);
+  const azimuth = Math.PI / 4 + state.yaw;
+  const elevation = Math.atan(1 / Math.sqrt(2)) + state.pitch;
+  const rightX = Math.cos(azimuth);
+  const rightY = -Math.sin(azimuth);
+  const downX = Math.sin(elevation) * Math.sin(azimuth);
+  const downY = Math.sin(elevation) * Math.cos(azimuth);
+  const downZ = -Math.cos(elevation);
   return {
-    x: width * .53 + (x1 - y2 * .62) * scale * perspective,
-    y: height * .54 + (-z2 + y2 * .58) * scale * perspective,
-    depth: y2
+    x: width * .53 + (point.x * rightX + point.y * rightY) * scale,
+    y: height * .54 + (point.x * downX + point.y * downY + point.z * downZ) * scale,
+    depth: point.x * Math.cos(elevation) * Math.sin(azimuth) + point.y * Math.cos(elevation) * Math.cos(azimuth) + point.z * Math.sin(elevation)
   };
 }
 
@@ -345,12 +344,11 @@ function drawEducationalDiagram(canvas, system, view = { yaw: 0, pitch: 0, zoom:
     dctx.save(); dctx.font='500 10px "DM Mono", monospace'; dctx.textAlign=align; dctx.textBaseline="middle"; dctx.fillStyle=color; dctx.fillText(text,p.x,p.y); dctx.restore();
   };
   const project = p => {
-    const cy=Math.cos(view.yaw),sy=Math.sin(view.yaw),cp=Math.cos(view.pitch),sp=Math.sin(view.pitch);
-    const x1=p.x*cy-p.y*sy;
-    const y1=p.x*sy+p.y*cy;
-    const y2=y1*cp-p.z*sp;
-    const z2=y1*sp+p.z*cp;
-    return { x: origin.x + (x1-y2*.62)*scale, y: origin.y + (-z2+y2*.58)*scale };
+    const azimuth=Math.PI/4+view.yaw;
+    const elevation=Math.atan(1/Math.sqrt(2))+view.pitch;
+    const screenX=p.x*Math.cos(azimuth)-p.y*Math.sin(azimuth);
+    const screenY=p.x*Math.sin(elevation)*Math.sin(azimuth)+p.y*Math.sin(elevation)*Math.cos(azimuth)-p.z*Math.cos(elevation);
+    return {x:origin.x+screenX*scale,y:origin.y+screenY*scale};
   };
   const drawAxes3D = () => {
     const e = extent * .92;
@@ -458,7 +456,7 @@ function setMainSystem(system) {
   state.zoom = 1;
   const is2D = system === "polar";
   document.getElementById("view-name").textContent = systems[system].name;
-  document.getElementById("interaction-hint").textContent = is2D ? "Síkbeli sugár és irányszög" : "Húzd a forgatáshoz · görgess a nagyításhoz";
+  document.getElementById("interaction-hint").textContent = is2D ? "Síkbeli sugár és irányszög" : "90°-os térbeli tengelyek · húzd a forgatáshoz";
   document.getElementById("reset-view").hidden = is2D;
   canvas.style.cursor = is2D ? "default" : "grab";
   document.getElementById("main-readout").textContent = systemValue(system);
