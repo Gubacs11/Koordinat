@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="hu">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f2eddf">
+  <meta name="description" content="Interaktív Descartes-, polár-, henger- és gömbi koordináta átváltó 2D és 3D szemléltetéssel.">
+  <title>Koordináta-labor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,650&family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=3">
+</head>
+<body>
+  <div class="noise" aria-hidden="true"></div>
+  <header class="site-header">
+    <a class="brand" href="#" aria-label="Koordináta-labor kezdőlap">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span>KOORDINÁTA<span class="brand-accent">//</span>LABOR</span>
+    </a>
+    <div class="header-meta"><span class="status-dot"></span> Interaktív tér</div>
+  </header>
+
+  <main>
+    <section class="intro">
+      <div>
+        <p class="eyebrow">Vektorok, érthetően</p>
+        <h1>Egy pont.<br><span>Négy nézőpont.</span></h1>
+      </div>
+      <p class="intro-copy">Adj meg egy pontot Descartes-koordinátákkal. Az átváltó kiszámolja és lerajzolja ugyanazt a helyet polár-, henger- és gömbi koordinátákban.</p>
+    </section>
+
+    <section class="workspace" aria-label="Koordináta átváltó">
+      <aside class="control-panel">
+        <div class="panel-heading">
+          <span class="step-number">01</span>
+          <div><p class="panel-kicker">Kiindulópont</p><h2>Descartes</h2></div>
+        </div>
+
+        <div class="coordinate-inputs">
+          <label class="coordinate-field x-field">
+            <span><b>x</b> tengely</span>
+            <span class="input-wrap"><input id="x-input" type="number" value="3" step="0.1" inputmode="decimal" aria-label="x koordináta"><em>x</em></span>
+          </label>
+          <label class="coordinate-field y-field">
+            <span><b>y</b> tengely</span>
+            <span class="input-wrap"><input id="y-input" type="number" value="4" step="0.1" inputmode="decimal" aria-label="y koordináta"><em>y</em></span>
+          </label>
+          <label class="coordinate-field z-field">
+            <span><b>z</b> tengely</span>
+            <span class="input-wrap"><input id="z-input" type="number" value="2" step="0.1" inputmode="decimal" aria-label="z koordináta"><em>z</em></span>
+          </label>
+        </div>
+
+        <div class="presets" aria-label="Példapontok">
+          <span>Példák</span>
+          <button type="button" data-point="3,4,2">3, 4, 2</button>
+          <button type="button" data-point="-2,3,4">−2, 3, 4</button>
+          <button type="button" data-point="4,-2,-3">4, −2, −3</button>
+        </div>
+
+        <div class="tip">
+          <span class="tip-icon">↕</span>
+          <p><strong>Tipp</strong>A mezőkben a nyílbillentyűkkel is lépkedhetsz.</p>
+        </div>
+      </aside>
+
+      <section class="visual-panel">
+        <div class="visual-toolbar">
+          <label class="main-system-control"><span>Megjelenített rendszer</span><select id="main-system"><option value="cartesian">Descartes</option><option value="polar">Polár</option><option value="cylindrical">Henger</option><option value="spherical">Gömbi</option></select></label>
+          <div class="visual-label"><span id="view-name">Térbeli nézet</span><small id="interaction-hint">Húzd a forgatáshoz · görgess a nagyításhoz</small></div>
+          <button class="reset-view" id="reset-view" type="button" aria-label="Nézet visszaállítása">↺ <span>Alaphelyzet</span></button>
+        </div>
+        <div class="canvas-wrap" id="canvas-wrap">
+          <canvas id="coordinate-canvas" aria-label="A pont interaktív koordináta-ábrája"></canvas>
+          <div class="point-readout" aria-live="polite"><span>P</span> <b id="main-readout">(x; y; z) = (3; 4; 2)</b></div>
+          <div class="axis-legend" aria-hidden="true"><span class="legend-x">x</span><span class="legend-y">y</span><span class="legend-z">z</span></div>
+        </div>
+      </section>
+    </section>
+
+    <section class="results-section" aria-labelledby="results-title">
+      <div class="results-heading">
+        <div class="panel-heading">
+          <span class="step-number">02</span>
+          <div><p class="panel-kicker">Válassz útvonalat</p><h2 id="results-title">Bárhonnan bárhová</h2></div>
+        </div>
+        <div class="angle-switch" role="group" aria-label="Szög mértékegysége">
+          <button id="degrees-button" type="button" aria-pressed="true">Fok</button>
+          <button id="radians-button" type="button" aria-pressed="false">Radián</button>
+        </div>
+      </div>
+
+      <div class="route-builder" aria-label="Átváltási útvonal">
+        <label>
+          <span>Amiből váltasz</span>
+          <select id="source-system">
+            <option value="cartesian">Descartes</option>
+            <option value="polar">Polár</option>
+            <option value="cylindrical">Henger</option>
+            <option value="spherical">Gömbi</option>
+          </select>
+        </label>
+        <button id="swap-systems" type="button" aria-label="Forrás és cél felcserélése">⇄</button>
+        <label>
+          <span>Amibe váltasz</span>
+          <select id="target-system">
+            <option value="cartesian">Descartes</option>
+            <option value="polar">Polár</option>
+            <option value="cylindrical">Henger</option>
+            <option value="spherical" selected>Gömbi</option>
+          </select>
+        </label>
+        <p><span aria-hidden="true">◎</span> A pontot továbbra is a fenti Descartes-mezőkkel adod meg; itt azt választod ki, melyik két leírását szeretnéd összehasonlítani.</p>
+      </div>
+
+      <div class="diagram-grid" aria-live="polite">
+        <figure class="system-diagram source-diagram">
+          <figcaption>
+            <button class="diagram-reset" id="source-reset" type="button" aria-label="Forrásábra alaphelyzetbe állítása">↺ Alaphelyzet</button>
+            <span class="diagram-role">Forrás · <b id="source-dimension">3D</b></span>
+            <h3 id="source-title">Descartes-rendszer</h3>
+            <code id="source-values">(x; y; z) = (3; 4; 2)</code>
+          </figcaption>
+          <canvas id="source-canvas" aria-label="A forrás-koordinátarendszer magyarázó ábrája"></canvas>
+          <p id="source-explanation">Három egymásra merőleges tengely adja meg a pont helyét.</p>
+        </figure>
+        <div class="route-arrow" aria-hidden="true"><span>→</span><small>Átváltás</small></div>
+        <figure class="system-diagram target-diagram">
+          <figcaption>
+            <button class="diagram-reset" id="target-reset" type="button" aria-label="Célábra alaphelyzetbe állítása">↺ Alaphelyzet</button>
+            <span class="diagram-role">Cél · <b id="target-dimension">3D</b></span>
+            <h3 id="target-title">Gömbi rendszer</h3>
+            <code id="target-values">(r; θ; φ) = (5.385; 53.13°; 68.199°)</code>
+          </figcaption>
+          <canvas id="target-canvas" aria-label="A cél-koordinátarendszer magyarázó ábrája"></canvas>
+          <p id="target-explanation">Egy sugár és két szög határozza meg a pontot a térben.</p>
+        </figure>
+      </div>
+
+      <div class="all-results-label"><span>03</span><p>Mind a négy alak</p></div>
+
+      <div class="result-grid">
+        <article class="result-card polar-card">
+          <div class="card-top"><span class="card-index">A</span><span class="dimension-tag">2D</span></div>
+          <h3>Polár</h3>
+          <p class="card-description">A pont vetülete az <i>xy</i> síkon: távolság az origótól és irányszög.</p>
+          <div class="result-values">
+            <div><span>r</span><strong id="polar-r">5</strong></div>
+            <div><span>θ</span><strong id="polar-theta">53.13°</strong></div>
+          </div>
+          <button class="formula-toggle" type="button" aria-expanded="false" aria-controls="polar-formula">Képlet megmutatása <span>＋</span></button>
+          <div class="formula" id="polar-formula" hidden><code>r = √(x² + y²)</code><code>θ = atan2(y, x)</code></div>
+        </article>
+
+        <article class="result-card cylindrical-card">
+          <div class="card-top"><span class="card-index">B</span><span class="dimension-tag">3D</span></div>
+          <h3>Henger</h3>
+          <p class="card-description">A polár vetület kiegészítve a pont függőleges magasságával.</p>
+          <div class="result-values three-values">
+            <div><span>ρ</span><strong id="cyl-rho">5</strong></div>
+            <div><span>φ</span><strong id="cyl-phi">53.13°</strong></div>
+            <div><span>z</span><strong id="cyl-z">2</strong></div>
+          </div>
+          <button class="formula-toggle" type="button" aria-expanded="false" aria-controls="cyl-formula">Képlet megmutatása <span>＋</span></button>
+          <div class="formula" id="cyl-formula" hidden><code>ρ = √(x² + y²)</code><code>φ = atan2(y, x)</code><code>z = z</code></div>
+        </article>
+
+        <article class="result-card spherical-card">
+          <div class="card-top"><span class="card-index">C</span><span class="dimension-tag">3D</span></div>
+          <h3>Gömbi</h3>
+          <p class="card-description">Távolság, az <i>xy</i> síkbeli irány és a pozitív <i>z</i> tengelytől mért szög.</p>
+          <div class="result-values three-values">
+            <div><span>r</span><strong id="sphere-r">5.39</strong></div>
+            <div><span>θ</span><strong id="sphere-theta">53.13°</strong></div>
+            <div><span>φ</span><strong id="sphere-phi">68.20°</strong></div>
+          </div>
+          <button class="formula-toggle" type="button" aria-expanded="false" aria-controls="sphere-formula">Képlet megmutatása <span>＋</span></button>
+          <div class="formula" id="sphere-formula" hidden><code>r = √(x² + y² + z²)</code><code>θ = atan2(y, x)</code><code>φ = acos(z / r)</code></div>
+        </article>
+      </div>
+      <p class="convention-note"><span>i</span> A gömbi koordinátáknál a <b>θ</b> az azimutszög, a <b>φ</b> pedig a pozitív z tengelytől mért polárszög.</p>
+    </section>
+  </main>
+
+  <footer><span>KOORDINÁTA//LABOR</span><p>Tanulj térben gondolkodni.</p><small>Statikus webalkalmazás · GitHub Pagesre kész</small></footer>
+  <script src="app.js?v=6"></script>
+</body>
+</html>
