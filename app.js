@@ -44,6 +44,43 @@ const colors = {
   plane: "rgba(8, 127, 131, 0.055)"
 };
 
+const themeToggle = document.getElementById("theme-toggle");
+const canvasThemes = {
+  light: {
+    coordinates: { grid:"rgba(23,49,59,.12)", axis:"rgba(23,49,59,.62)", text:"rgba(23,49,59,.78)", x:"#c74752", y:"#087f83", z:"#2c6f9f", violet:"#80569c", point:"#e5664f", guide:"rgba(229,102,79,.58)", plane:"rgba(8,127,131,.055)" },
+    plot: { grid:"rgba(23,49,59,.14)", mesh:"rgba(23,49,59,.12)", planeFill:"rgba(128,86,156,.25)", planeMesh:"rgba(92,55,119,.38)", planeEdge:"rgba(104,66,127,.92)", x:"#c74752", y:"#2c6f9f", z:"#087f83", marker:"#80569c", markerRing:"#fffdf6", markerText:"#68427f" }
+  },
+  dark: {
+    coordinates: { grid:"rgba(166,186,215,.14)", axis:"rgba(220,230,245,.68)", text:"rgba(243,246,251,.82)", x:"#ff6b76", y:"#54e6d8", z:"#72b7ff", violet:"#a996ff", point:"#ff9e57", guide:"rgba(255,158,87,.62)", plane:"rgba(84,230,216,.06)" },
+    plot: { grid:"rgba(210,225,245,.13)", mesh:"rgba(5,9,17,.2)", planeFill:"rgba(169,150,255,.28)", planeMesh:"rgba(202,190,255,.48)", planeEdge:"rgba(190,176,255,.96)", x:"#ff6b76", y:"#72b7ff", z:"#54e6d8", marker:"#a996ff", markerRing:"#080c18", markerText:"#d8d0ff" }
+  }
+};
+let plotTheme = canvasThemes.light.plot;
+
+function setTheme(theme, persist = false, redraw = true) {
+  const selected = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = selected;
+  document.getElementById("theme-color-meta").setAttribute("content", selected === "dark" ? "#080c18" : "#f2eddf");
+  themeToggle.setAttribute("aria-pressed", String(selected === "dark"));
+  themeToggle.setAttribute("aria-label", selected === "dark" ? "Világos téma bekapcsolása" : "Sötét téma bekapcsolása");
+  themeToggle.querySelector("span").textContent = selected === "dark" ? "☀" : "☾";
+  themeToggle.querySelector("b").textContent = selected === "dark" ? "Világos" : "Sötét";
+  Object.assign(colors, canvasThemes[selected].coordinates);
+  plotTheme = canvasThemes[selected].plot;
+  if (persist) {
+    try { localStorage.setItem("coordinate-theme", selected); } catch (_) {}
+  }
+  if (redraw) {
+    calculate();
+    drawFunctionPlot();
+    drawField();
+  }
+}
+
+themeToggle.addEventListener("click", () => {
+  setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark", true);
+});
+
 const systems = {
   cartesian: {
     name: "Descartes-rendszer",
@@ -567,9 +604,19 @@ const plotState = {
   size: 0,
   rangeMin: -5,
   rangeMax: 5,
+  viewMinX: -5,
+  viewMaxX: 5,
+  viewMinY: -5,
+  viewMaxY: 5,
+  autoFocused: false,
   zLimit: 1,
   rawMin: 0,
   rawMax: 0,
+  invalidCount: 0,
+  skippedQuads: 0,
+  medianAbs: 1,
+  evaluate: null,
+  hasTangent: false,
   linear: null,
   displayMode: "both",
   heightScale: .7
@@ -772,9 +819,12 @@ function createFunctionPlot() {
       throw new Error("A tartomány eleje legyen kisebb a végénél.");
     }
     const compiled = compileExpression(functionInput.value);
-    const size = Math.max(12, Math.min(60, Number(plotResolutionInput.value) || 36));
+    const requestedSize = Math.max(12, Math.min(60, Number(plotResolutionInput.value) || 36));
+    const rangeSpan = rangeMax - rangeMin;
+    const size = Math.min(120, Math.max(requestedSize, Math.ceil(rangeSpan * 3)));
     const samples = [];
     const finiteValues = [];
+    let invalidCount = 0;
     for (let row = 0; row <= size; row++) {
       const y = rangeMin + (rangeMax - rangeMin) * row / size;
       const line = [];
@@ -783,21 +833,51 @@ function createFunctionPlot() {
         let z;
         try { z = compiled.evaluate(x, y); } catch { z = NaN; }
         if (Number.isFinite(z) && Math.abs(z) < 1e10) finiteValues.push(z);
-        else z = null;
+        else { z = null; invalidCount++; }
         line.push({ x, y, z });
       }
       samples.push(line);
     }
     if (!finiteValues.length) throw new Error("Ebben a tartományban a függvénynek nincs kirajzolható értéke.");
     const sortedAbsolute = finiteValues.map(Math.abs).sort((a, b) => a - b);
-    const percentile = sortedAbsolute[Math.floor((sortedAbsolute.length - 1) * .95)];
+    const percentile = sortedAbsolute[Math.floor((sortedAbsolute.length - 1) * .90)];
+    const hasTangent = /\btan\s*\(/.test(compiled.normalized);
     plotState.samples = samples;
     plotState.size = size;
     plotState.rangeMin = rangeMin;
     plotState.rangeMax = rangeMax;
-    plotState.zLimit = Math.max(percentile, .001);
+    const maximumAbsolute = sortedAbsolute[sortedAbsolute.length - 1];
+    plotState.zLimit = hasTangent ? Math.max(percentile, maximumAbsolute * .15, .001) : Math.max(maximumAbsolute, .001);
+    const activeThreshold = maximumAbsolute * .02;
+    const activePoints = samples.flat().filter(point => point.z !== null && Math.abs(point.z) >= activeThreshold);
+    let viewMinX = rangeMin, viewMaxX = rangeMax, viewMinY = rangeMin, viewMaxY = rangeMax;
+    if (activePoints.length) {
+      const activeMinX = Math.min(...activePoints.map(point => point.x));
+      const activeMaxX = Math.max(...activePoints.map(point => point.x));
+      const activeMinY = Math.min(...activePoints.map(point => point.y));
+      const activeMaxY = Math.max(...activePoints.map(point => point.y));
+      const minimumViewSpan = rangeSpan * .18;
+      const activeSpan = Math.max(activeMaxX - activeMinX, activeMaxY - activeMinY, minimumViewSpan);
+      const viewSpan = Math.min(rangeSpan, activeSpan * 1.28);
+      const centerX = (activeMinX + activeMaxX) / 2;
+      const centerY = (activeMinY + activeMaxY) / 2;
+      viewMinX = Math.max(rangeMin, Math.min(rangeMax - viewSpan, centerX - viewSpan / 2));
+      viewMaxX = viewMinX + viewSpan;
+      viewMinY = Math.max(rangeMin, Math.min(rangeMax - viewSpan, centerY - viewSpan / 2));
+      viewMaxY = viewMinY + viewSpan;
+    }
+    plotState.viewMinX = viewMinX;
+    plotState.viewMaxX = viewMaxX;
+    plotState.viewMinY = viewMinY;
+    plotState.viewMaxY = viewMaxY;
+    plotState.autoFocused = (viewMaxX - viewMinX) < rangeSpan * .85 || (viewMaxY - viewMinY) < rangeSpan * .85;
     plotState.rawMin = Math.min(...finiteValues);
     plotState.rawMax = Math.max(...finiteValues);
+    plotState.invalidCount = invalidCount;
+    plotState.skippedQuads = 0;
+    plotState.medianAbs = Math.max(sortedAbsolute[Math.floor((sortedAbsolute.length - 1) * .5)], 1e-9);
+    plotState.evaluate = compiled.evaluate;
+    plotState.hasTangent = hasTangent;
     plotState.linear = null;
     if (linearizeToggle.checked) {
       const x0 = Number(linearXInput.value);
@@ -822,7 +902,9 @@ function createFunctionPlot() {
     functionError.hidden = true;
     document.getElementById("expression-field").classList.remove("has-error");
     document.getElementById("plot-formula").textContent = `z = ${displayExpression(compiled.normalized)}`;
-    document.getElementById("plot-status").textContent = `z: ${plotNumber(plotState.rawMin)} … ${plotNumber(plotState.rawMax)}`;
+    document.getElementById("plot-range").textContent = plotState.autoFocused
+      ? `z: ${plotNumber(plotState.rawMin)} … ${plotNumber(plotState.rawMax)} · automatikus fókusz`
+      : `z: ${plotNumber(plotState.rawMin)} … ${plotNumber(plotState.rawMax)}`;
     drawFunctionPlot();
   } catch (error) {
     if (linearizeToggle.checked && !plotState.linear) {
@@ -837,11 +919,30 @@ function createFunctionPlot() {
   }
 }
 
+function updatePlotWarning() {
+  const status = document.getElementById("plot-status");
+  const warning = document.getElementById("plot-warning");
+  const reasons = [];
+  if (plotState.invalidCount > 0) reasons.push(`${plotState.invalidCount} nem értelmezhető mintapont`);
+  if (plotState.skippedQuads > 0) reasons.push(`${plotState.skippedQuads} nagy ugrás`);
+  if (reasons.length) {
+    warning.textContent = `⚠ A háló megszakítva: ${reasons.join(" · ")}.`;
+    warning.hidden = false;
+    status.classList.add("has-warning");
+  } else {
+    warning.hidden = true;
+    warning.textContent = "";
+    status.classList.remove("has-warning");
+  }
+}
+
 function projectFunctionPoint(point, width, height) {
-  const halfRange = (plotState.rangeMax - plotState.rangeMin) / 2;
-  const midpoint = (plotState.rangeMin + plotState.rangeMax) / 2;
-  const x = (point.x - midpoint) / halfRange;
-  const y = (point.y - midpoint) / halfRange;
+  const halfRangeX = (plotState.viewMaxX - plotState.viewMinX) / 2;
+  const halfRangeY = (plotState.viewMaxY - plotState.viewMinY) / 2;
+  const midpointX = (plotState.viewMinX + plotState.viewMaxX) / 2;
+  const midpointY = (plotState.viewMinY + plotState.viewMaxY) / 2;
+  const x = (point.x - midpointX) / halfRangeX;
+  const y = (point.y - midpointY) / halfRangeY;
   const z = Math.max(-1.15, Math.min(1.15, point.z / plotState.zLimit)) * plotState.heightScale;
   const angle = plotState.yaw - Math.PI / 4;
   const elevation = plotState.pitch + .62;
@@ -889,40 +990,66 @@ function drawFunctionPlot() {
 
   const min = plotState.rangeMin;
   const max = plotState.rangeMax;
-  const middle = (min + max) / 2;
-  const gridColor = "rgba(23,49,59,.14)";
+  const xMin = plotState.viewMinX, xMax = plotState.viewMaxX;
+  const yMin = plotState.viewMinY, yMax = plotState.viewMaxY;
+  const middleX = (xMin + xMax) / 2;
+  const middleY = (yMin + yMax) / 2;
+  const gridColor = plotTheme.grid;
   for (let index = 0; index <= 8; index++) {
-    const value = min + (max - min) * index / 8;
-    drawFunctionLine([{x:min,y:value,z:0},{x:max,y:value,z:0}], gridColor, 1, width, height);
-    drawFunctionLine([{x:value,y:min,z:0},{x:value,y:max,z:0}], gridColor, 1, width, height);
+    const xValue = xMin + (xMax - xMin) * index / 8;
+    const yValue = yMin + (yMax - yMin) * index / 8;
+    drawFunctionLine([{x:xMin,y:yValue,z:0},{x:xMax,y:yValue,z:0}], gridColor, 1, width, height);
+    drawFunctionLine([{x:xValue,y:yMin,z:0},{x:xValue,y:yMax,z:0}], gridColor, 1, width, height);
   }
 
   const quads = [];
   let planeBoundary = null;
+  let discontinuityCount = plotState.skippedQuads;
   if (!plotState.linear || plotState.displayMode !== "plane") {
+    discontinuityCount = 0;
     for (let row = 0; row < plotState.size; row++) {
       for (let column = 0; column < plotState.size; column++) {
         const points = [plotState.samples[row][column], plotState.samples[row][column+1], plotState.samples[row+1][column+1], plotState.samples[row+1][column]];
         if (points.some(point => point.z === null)) continue;
-        const visibleZ = points.map(point => Math.max(-plotState.zLimit * 1.15, Math.min(plotState.zLimit * 1.15, point.z)));
-        if (Math.max(...visibleZ) - Math.min(...visibleZ) > plotState.zLimit * 1.5) continue;
+        if (points.every(point => point.x < xMin || point.x > xMax || point.y < yMin || point.y > yMax)) continue;
+        const edgePairs = [[0,1],[1,2],[2,3],[3,0]];
+        const hasAsymptoticEdge = plotState.hasTangent && edgePairs.some(([first, second]) => {
+          const start = points[first];
+          const end = points[second];
+          if (start.z * end.z >= 0) return false;
+          const values = [start.z];
+          for (const fraction of [.25, .5, .75]) {
+            const x = start.x + (end.x - start.x) * fraction;
+            const y = start.y + (end.y - start.y) * fraction;
+            const value = finitePlotValue(plotState.evaluate, x, y);
+            if (value === null) return true;
+            values.push(value);
+          }
+          values.push(end.z);
+          const totalVariation = values.slice(1).reduce((sum, value, index) => sum + Math.abs(value - values[index]), 0);
+          const directChange = Math.max(Math.abs(end.z - start.z), 1e-9);
+          const largestValue = Math.max(...values.map(Math.abs));
+          return totalVariation > directChange * 1.08 && largestValue > plotState.medianAbs * 2;
+        });
+        if (hasAsymptoticEdge) { discontinuityCount++; continue; }
         const projected = points.map(point => projectFunctionPoint(point, width, height));
         quads.push({ kind: "surface", projected, depth: projected.reduce((sum, point) => sum + point.depth, 0) / 4, z: points.reduce((sum, point) => sum + point.z, 0) / 4 });
       }
     }
   }
+  plotState.skippedQuads = discontinuityCount;
   if (plotState.linear && plotState.displayMode !== "surface") {
     const linear = plotState.linear;
-    const span = max - min;
+    const span = Math.max(xMax - xMin, yMax - yMin);
     const baseHalfSize = span * .24;
     const cornerChange = (Math.abs(linear.fx) + Math.abs(linear.fy)) * baseHalfSize;
     const safeChange = plotState.zLimit * .68;
     const adaptiveScale = cornerChange > safeChange ? safeChange / cornerChange : 1;
     const halfSize = baseHalfSize * adaptiveScale;
-    const patchMinX = Math.max(min, linear.x0 - halfSize);
-    const patchMaxX = Math.min(max, linear.x0 + halfSize);
-    const patchMinY = Math.max(min, linear.y0 - halfSize);
-    const patchMaxY = Math.min(max, linear.y0 + halfSize);
+    const patchMinX = Math.max(xMin, linear.x0 - halfSize);
+    const patchMaxX = Math.min(xMax, linear.x0 + halfSize);
+    const patchMinY = Math.max(yMin, linear.y0 - halfSize);
+    const patchMaxY = Math.min(yMax, linear.y0 + halfSize);
     const planeSize = 9;
     const planeValue = (x, y) => linear.z0 + linear.fx * (x - linear.x0) + linear.fy * (y - linear.y0);
     planeBoundary = [
@@ -950,18 +1077,18 @@ function drawFunctionPlot() {
     quad.projected.forEach((point, index) => index ? functionCtx.lineTo(point.x, point.y) : functionCtx.moveTo(point.x, point.y));
     functionCtx.closePath();
     const surfaceAlpha = plotState.linear && plotState.displayMode === "both" ? .66 : .82;
-    functionCtx.fillStyle = quad.kind === "plane" ? "rgba(128,86,156,.25)" : surfaceColor(quad.z, surfaceAlpha);
+    functionCtx.fillStyle = quad.kind === "plane" ? plotTheme.planeFill : surfaceColor(quad.z, surfaceAlpha);
     functionCtx.fill();
-    functionCtx.strokeStyle = quad.kind === "plane" ? "rgba(92,55,119,.38)" : "rgba(23,49,59,.12)";
+    functionCtx.strokeStyle = quad.kind === "plane" ? plotTheme.planeMesh : plotTheme.mesh;
     functionCtx.lineWidth = quad.kind === "plane" ? .75 : .6;
     functionCtx.stroke();
   });
-  if (planeBoundary) drawFunctionLine(planeBoundary, "rgba(104,66,127,.92)", 2.2, width, height);
+  if (planeBoundary) drawFunctionLine(planeBoundary, plotTheme.planeEdge, 2.2, width, height);
 
   const axes = [
-    { points:[{x:min,y:middle,z:0},{x:max,y:middle,z:0}], label:"x", color:"#c74752" },
-    { points:[{x:middle,y:min,z:0},{x:middle,y:max,z:0}], label:"y", color:"#2c6f9f" },
-    { points:[{x:middle,y:middle,z:-plotState.zLimit},{x:middle,y:middle,z:plotState.zLimit}], label:"z", color:"#087f83" }
+    { points:[{x:xMin,y:middleY,z:0},{x:xMax,y:middleY,z:0}], label:"x", color:plotTheme.x },
+    { points:[{x:middleX,y:yMin,z:0},{x:middleX,y:yMax,z:0}], label:"y", color:plotTheme.y },
+    { points:[{x:middleX,y:middleY,z:-plotState.zLimit},{x:middleX,y:middleY,z:plotState.zLimit}], label:"z", color:plotTheme.z }
   ];
   functionCtx.font = "600 13px IBM Plex Mono, monospace";
   axes.forEach(axis => {
@@ -974,15 +1101,16 @@ function drawFunctionPlot() {
     const point = projectFunctionPoint({ x: plotState.linear.x0, y: plotState.linear.y0, z: plotState.linear.z0 }, width, height);
     functionCtx.beginPath();
     functionCtx.arc(point.x, point.y, 6, 0, Math.PI * 2);
-    functionCtx.fillStyle = "#80569c";
+    functionCtx.fillStyle = plotTheme.marker;
     functionCtx.fill();
-    functionCtx.strokeStyle = "#fffdf6";
+    functionCtx.strokeStyle = plotTheme.markerRing;
     functionCtx.lineWidth = 2;
     functionCtx.stroke();
-    functionCtx.fillStyle = "#68427f";
+    functionCtx.fillStyle = plotTheme.markerText;
     functionCtx.font = "600 10px IBM Plex Mono, monospace";
     functionCtx.fillText(`(${plotNumber(plotState.linear.x0)}; ${plotNumber(plotState.linear.y0)})`, point.x + 9, point.y - 8);
   }
+  updatePlotWarning();
 }
 
 function insertMathToken(token) {
@@ -1075,11 +1203,282 @@ document.getElementById("reset-plot").addEventListener("click", () => {
   drawFunctionPlot();
 });
 
+const fieldCanvas = document.getElementById("field-canvas");
+const fieldContext = fieldCanvas.getContext("2d");
+const scalarFieldInput = document.getElementById("scalar-field-input");
+const vectorXInput = document.getElementById("vector-x-input");
+const vectorYInput = document.getElementById("vector-y-input");
+const fieldMinInput = document.getElementById("field-min");
+const fieldMaxInput = document.getElementById("field-max");
+const fieldDensityInput = document.getElementById("field-density");
+const fieldPointXInput = document.getElementById("field-point-x");
+const fieldPointYInput = document.getElementById("field-point-y");
+const fieldError = document.getElementById("field-error");
+const fieldStatus = document.getElementById("field-status");
+const fieldHoverReadout = document.getElementById("field-hover-readout");
+const fieldState = {
+  mode: "scalar", scalarEvaluate: null, vectorXEvaluate: null, vectorYEvaluate: null,
+  min: -5, max: 5, density: 18, pointX: 1, pointY: 1, invalidCount: 0
+};
+
+function fieldColor(t) {
+  const clamped = Math.max(0, Math.min(1, t));
+  const stops = [[22,124,128], [244,236,216], [229,102,79]];
+  const section = clamped < .5 ? 0 : 1;
+  const local = section === 0 ? clamped * 2 : (clamped - .5) * 2;
+  const a = stops[section], b = stops[section + 1];
+  return `rgb(${Math.round(a[0] + (b[0] - a[0]) * local)},${Math.round(a[1] + (b[1] - a[1]) * local)},${Math.round(a[2] + (b[2] - a[2]) * local)})`;
+}
+
+function prepareFieldCanvas() {
+  const rect = fieldCanvas.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.max(320, rect.width || 700);
+  const height = Math.max(320, rect.height || 540);
+  if (fieldCanvas.width !== Math.round(width * dpr) || fieldCanvas.height !== Math.round(height * dpr)) {
+    fieldCanvas.width = Math.round(width * dpr);
+    fieldCanvas.height = Math.round(height * dpr);
+  }
+  fieldContext.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { width, height };
+}
+
+function fieldPointToCanvas(x, y, area) {
+  const span = fieldState.max - fieldState.min;
+  return {
+    x: area.left + (x - fieldState.min) / span * area.width,
+    y: area.top + (fieldState.max - y) / span * area.height
+  };
+}
+
+function drawFieldGrid(area) {
+  const dark = document.documentElement.dataset.theme === "dark";
+  const span = fieldState.max - fieldState.min;
+  fieldContext.save();
+  fieldContext.strokeStyle = dark ? "rgba(255,255,255,.09)" : "rgba(23,49,59,.12)";
+  fieldContext.fillStyle = dark ? "#8495ae" : "#60747a";
+  fieldContext.lineWidth = 1;
+  fieldContext.font = "9px 'IBM Plex Mono', monospace";
+  fieldContext.textAlign = "center";
+  fieldContext.textBaseline = "top";
+  const divisions = 10;
+  for (let i = 0; i <= divisions; i++) {
+    const x = area.left + area.width * i / divisions;
+    const y = area.top + area.height * i / divisions;
+    fieldContext.beginPath(); fieldContext.moveTo(x, area.top); fieldContext.lineTo(x, area.top + area.height); fieldContext.stroke();
+    fieldContext.beginPath(); fieldContext.moveTo(area.left, y); fieldContext.lineTo(area.left + area.width, y); fieldContext.stroke();
+    if (i % 2 === 0) {
+      fieldContext.fillText(plotNumber(fieldState.min + span * i / divisions), x, area.top + area.height + 8);
+      fieldContext.save(); fieldContext.textAlign = "right"; fieldContext.textBaseline = "middle";
+      fieldContext.fillText(plotNumber(fieldState.max - span * i / divisions), area.left - 8, y); fieldContext.restore();
+    }
+  }
+  if (fieldState.min <= 0 && fieldState.max >= 0) {
+    const origin = fieldPointToCanvas(0, 0, area);
+    fieldContext.strokeStyle = dark ? "rgba(243,246,251,.7)" : "rgba(23,49,59,.7)";
+    fieldContext.lineWidth = 1.5;
+    fieldContext.beginPath(); fieldContext.moveTo(origin.x, area.top); fieldContext.lineTo(origin.x, area.top + area.height); fieldContext.stroke();
+    fieldContext.beginPath(); fieldContext.moveTo(area.left, origin.y); fieldContext.lineTo(area.left + area.width, origin.y); fieldContext.stroke();
+  }
+  fieldContext.restore();
+}
+
+function drawFieldArrow(fromX, fromY, dx, dy, color, width = 1.7) {
+  const length = Math.hypot(dx, dy);
+  if (length < .5) return;
+  const head = Math.min(8, Math.max(4, length * .28));
+  const angle = Math.atan2(dy, dx);
+  fieldContext.save();
+  fieldContext.strokeStyle = color; fieldContext.fillStyle = color; fieldContext.lineWidth = width;
+  fieldContext.beginPath(); fieldContext.moveTo(fromX, fromY); fieldContext.lineTo(fromX + dx, fromY + dy); fieldContext.stroke();
+  fieldContext.beginPath();
+  fieldContext.moveTo(fromX + dx, fromY + dy);
+  fieldContext.lineTo(fromX + dx - head * Math.cos(angle - .48), fromY + dy - head * Math.sin(angle - .48));
+  fieldContext.lineTo(fromX + dx - head * Math.cos(angle + .48), fromY + dy - head * Math.sin(angle + .48));
+  fieldContext.closePath(); fieldContext.fill(); fieldContext.restore();
+}
+
+function drawField() {
+  if (!fieldState.scalarEvaluate && !fieldState.vectorXEvaluate) return;
+  const { width, height } = prepareFieldCanvas();
+  const dark = document.documentElement.dataset.theme === "dark";
+  const area = { left: 52, top: 25, width: width - 76, height: height - 78 };
+  fieldContext.clearRect(0, 0, width, height);
+  fieldContext.fillStyle = dark ? "#0a1020" : "#fbf8ee";
+  fieldContext.fillRect(0, 0, width, height);
+  let invalidCount = 0;
+
+  if (fieldState.mode === "scalar") {
+    const grid = Math.max(36, fieldState.density * 3);
+    const samples = [];
+    let low = Infinity, high = -Infinity;
+    for (let row = 0; row < grid; row++) {
+      const y = fieldState.max - (row + .5) / grid * (fieldState.max - fieldState.min);
+      for (let column = 0; column < grid; column++) {
+        const x = fieldState.min + (column + .5) / grid * (fieldState.max - fieldState.min);
+        const value = finitePlotValue(fieldState.scalarEvaluate, x, y);
+        samples.push(value);
+        if (value === null) invalidCount++; else { low = Math.min(low, value); high = Math.max(high, value); }
+      }
+    }
+    const scale = Math.max(Math.abs(low), Math.abs(high), 1e-9);
+    const cellWidth = area.width / grid, cellHeight = area.height / grid;
+    samples.forEach((value, index) => {
+      if (value === null) return;
+      const row = Math.floor(index / grid), column = index % grid;
+      fieldContext.fillStyle = fieldColor(.5 + value / (2 * scale));
+      fieldContext.fillRect(area.left + column * cellWidth, area.top + row * cellHeight, cellWidth + .6, cellHeight + .6);
+    });
+    document.getElementById("field-color-scale").hidden = false;
+  } else {
+    document.getElementById("field-color-scale").hidden = false;
+    const arrows = [], magnitudes = [];
+    for (let row = 0; row < fieldState.density; row++) {
+      const y = fieldState.max - (row + .5) / fieldState.density * (fieldState.max - fieldState.min);
+      for (let column = 0; column < fieldState.density; column++) {
+        const x = fieldState.min + (column + .5) / fieldState.density * (fieldState.max - fieldState.min);
+        const vx = finitePlotValue(fieldState.vectorXEvaluate, x, y);
+        const vy = finitePlotValue(fieldState.vectorYEvaluate, x, y);
+        if (vx === null || vy === null) { invalidCount++; continue; }
+        const magnitude = Math.hypot(vx, vy);
+        arrows.push({ x, y, vx, vy, magnitude }); magnitudes.push(magnitude);
+      }
+    }
+    const ordered = [...magnitudes].sort((a,b) => a-b);
+    const scale = ordered[Math.floor((ordered.length - 1) * .9)] || 1;
+    drawFieldGrid(area);
+    const cell = Math.min(area.width, area.height) / fieldState.density;
+    arrows.forEach(arrow => {
+      if (arrow.magnitude < 1e-10) return;
+      const point = fieldPointToCanvas(arrow.x, arrow.y, area);
+      const ratio = Math.min(1, arrow.magnitude / scale);
+      const length = cell * (.26 + .56 * ratio);
+      drawFieldArrow(point.x, point.y, arrow.vx / arrow.magnitude * length, -arrow.vy / arrow.magnitude * length, fieldColor(.18 + .78 * ratio));
+    });
+  }
+  if (fieldState.mode === "scalar") drawFieldGrid(area);
+
+  const selected = fieldPointToCanvas(fieldState.pointX, fieldState.pointY, area);
+  fieldContext.save();
+  fieldContext.fillStyle = dark ? "#f3f6fb" : "#fffdf6";
+  fieldContext.strokeStyle = "#80569c"; fieldContext.lineWidth = 3;
+  fieldContext.beginPath(); fieldContext.arc(selected.x, selected.y, 5.5, 0, Math.PI * 2); fieldContext.fill(); fieldContext.stroke();
+  fieldContext.restore();
+  fieldState.invalidCount = invalidCount;
+  const kind = fieldState.mode === "scalar" ? "színcella" : "vektor";
+  fieldStatus.classList.toggle("has-warning", invalidCount > 0);
+  fieldStatus.innerHTML = invalidCount > 0
+    ? `<span>${fieldState.density}×${fieldState.density} mintavétel</span><strong>⚠ ${invalidCount} nem értelmezhető ${kind} kihagyva.</strong>`
+    : `<span>${fieldState.min} ≤ x, y ≤ ${fieldState.max}</span><strong>${fieldState.mode === "scalar" ? "A lila nyíl a gradienst mutatja." : "A nyílhossz a relatív nagyságot mutatja."}</strong>`;
+
+  if (fieldState.mode === "scalar") {
+    const center = finitePlotValue(fieldState.scalarEvaluate, fieldState.pointX, fieldState.pointY);
+    const step = Math.max((fieldState.max - fieldState.min) * 1e-4, 1e-6);
+    const gx = center === null ? null : numericalDerivative(fieldState.scalarEvaluate, fieldState.pointX, fieldState.pointY, "x", step, center);
+    const gy = center === null ? null : numericalDerivative(fieldState.scalarEvaluate, fieldState.pointX, fieldState.pointY, "y", step, center);
+    if (gx !== null && gy !== null && Math.hypot(gx, gy) > 1e-10) {
+      const magnitude = Math.hypot(gx, gy), length = 52;
+      drawFieldArrow(selected.x, selected.y, gx / magnitude * length, -gy / magnitude * length, "#80569c", 2.5);
+    }
+  }
+}
+
+function setFieldLabels(mode) {
+  const scalar = mode === "scalar";
+  const labels = scalar ? ["f(x₀,y₀)", "∇f", "|∇f|", "Irány"] : ["F(x₀,y₀)", "|F|", "div F", "rot F"];
+  labels.forEach((label, index) => document.getElementById(`field-result-label-${index + 1}`).textContent = label);
+  document.getElementById("scalar-field-controls").hidden = !scalar;
+  document.getElementById("vector-field-controls").hidden = scalar;
+  document.getElementById("field-visual-title").textContent = scalar ? "Skalármező · f(x,y)" : "Vektormező · F(x,y)";
+}
+
+function setFieldResults(values) {
+  values.forEach((value, index) => document.getElementById(`field-result-${index + 1}`).textContent = value);
+}
+
+function calculateField() {
+  fieldError.hidden = true;
+  try {
+    const min = Number(fieldMinInput.value), max = Number(fieldMaxInput.value);
+    const pointX = Number(fieldPointXInput.value), pointY = Number(fieldPointYInput.value);
+    if (![min, max, pointX, pointY].every(Number.isFinite)) throw new Error("A tartomány és a vizsgált pont csak számokat tartalmazhat.");
+    if (min >= max) throw new Error("A tartomány vége legyen nagyobb a kezdeténél.");
+    if (pointX < min || pointX > max || pointY < min || pointY > max) throw new Error("A vizsgált pont legyen a megadott tartományon belül.");
+    fieldState.min = min; fieldState.max = max; fieldState.pointX = pointX; fieldState.pointY = pointY;
+    fieldState.density = Number(fieldDensityInput.value);
+    const step = Math.max((max - min) * 1e-4, 1e-6);
+    if (fieldState.mode === "scalar") {
+      fieldState.scalarEvaluate = compileExpression(scalarFieldInput.value.trim()).evaluate;
+      const value = finitePlotValue(fieldState.scalarEvaluate, pointX, pointY);
+      if (value === null) throw new Error("A skalármező a kiválasztott pontban nem értelmezhető.");
+      const gx = numericalDerivative(fieldState.scalarEvaluate, pointX, pointY, "x", step, value);
+      const gy = numericalDerivative(fieldState.scalarEvaluate, pointX, pointY, "y", step, value);
+      const gradientValid = gx !== null && gy !== null;
+      const magnitude = gradientValid ? Math.hypot(gx, gy) : null;
+      const direction = gradientValid && magnitude > 1e-10 ? `${plotNumber(Math.atan2(gy, gx) * 180 / Math.PI)}°` : magnitude === 0 ? "nincs" : "–";
+      setFieldResults([plotNumber(value), gradientValid ? `(${plotNumber(gx)}; ${plotNumber(gy)})` : "–", plotNumber(magnitude), direction]);
+    } else {
+      fieldState.vectorXEvaluate = compileExpression(vectorXInput.value.trim()).evaluate;
+      fieldState.vectorYEvaluate = compileExpression(vectorYInput.value.trim()).evaluate;
+      const vx = finitePlotValue(fieldState.vectorXEvaluate, pointX, pointY);
+      const vy = finitePlotValue(fieldState.vectorYEvaluate, pointX, pointY);
+      if (vx === null || vy === null) throw new Error("A vektormező a kiválasztott pontban nem értelmezhető.");
+      const dFxDx = numericalDerivative(fieldState.vectorXEvaluate, pointX, pointY, "x", step, vx);
+      const dFyDy = numericalDerivative(fieldState.vectorYEvaluate, pointX, pointY, "y", step, vy);
+      const dFyDx = numericalDerivative(fieldState.vectorYEvaluate, pointX, pointY, "x", step, vy);
+      const dFxDy = numericalDerivative(fieldState.vectorXEvaluate, pointX, pointY, "y", step, vx);
+      const divergence = dFxDx === null || dFyDy === null ? null : dFxDx + dFyDy;
+      const rotation = dFyDx === null || dFxDy === null ? null : dFyDx - dFxDy;
+      setFieldResults([`(${plotNumber(vx)}; ${plotNumber(vy)})`, plotNumber(Math.hypot(vx, vy)), plotNumber(divergence), plotNumber(rotation)]);
+    }
+    setFieldLabels(fieldState.mode);
+    drawField();
+    updateFieldReadout(pointX, pointY);
+  } catch (error) {
+    fieldError.textContent = error.message || "A mező nem számítható ki.";
+    fieldError.hidden = false;
+  }
+}
+
+function updateFieldReadout(x, y) {
+  if (fieldState.mode === "scalar" && fieldState.scalarEvaluate) {
+    const value = finitePlotValue(fieldState.scalarEvaluate, x, y);
+    fieldHoverReadout.textContent = `x = ${plotNumber(x)} · y = ${plotNumber(y)} · f = ${plotNumber(value)}`;
+  } else if (fieldState.vectorXEvaluate && fieldState.vectorYEvaluate) {
+    const vx = finitePlotValue(fieldState.vectorXEvaluate, x, y), vy = finitePlotValue(fieldState.vectorYEvaluate, x, y);
+    fieldHoverReadout.textContent = `x = ${plotNumber(x)} · y = ${plotNumber(y)} · F = (${plotNumber(vx)}; ${plotNumber(vy)}) · |F| = ${plotNumber(vx === null || vy === null ? null : Math.hypot(vx, vy))}`;
+  }
+}
+
+let fieldInputTimer;
+document.querySelectorAll("[data-field-mode]").forEach(button => button.addEventListener("click", () => {
+  fieldState.mode = button.dataset.fieldMode;
+  document.querySelectorAll("[data-field-mode]").forEach(item => item.setAttribute("aria-pressed", String(item === button)));
+  setFieldLabels(fieldState.mode); calculateField();
+}));
+document.getElementById("calculate-field").addEventListener("click", calculateField);
+[scalarFieldInput, vectorXInput, vectorYInput, fieldPointXInput, fieldPointYInput].forEach(input => {
+  input.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); calculateField(); } });
+  input.addEventListener("input", () => { clearTimeout(fieldInputTimer); fieldInputTimer = setTimeout(calculateField, 420); });
+});
+[fieldMinInput, fieldMaxInput, fieldDensityInput].forEach(input => input.addEventListener("change", calculateField));
+fieldCanvas.addEventListener("pointermove", event => {
+  const rect = fieldCanvas.getBoundingClientRect();
+  const area = { left: 52, top: 25, width: rect.width - 76, height: rect.height - 78 };
+  if (event.offsetX < area.left || event.offsetX > area.left + area.width || event.offsetY < area.top || event.offsetY > area.top + area.height) return;
+  const x = fieldState.min + (event.offsetX - area.left) / area.width * (fieldState.max - fieldState.min);
+  const y = fieldState.max - (event.offsetY - area.top) / area.height * (fieldState.max - fieldState.min);
+  updateFieldReadout(x, y);
+});
+fieldCanvas.addEventListener("pointerleave", () => updateFieldReadout(fieldState.pointX, fieldState.pointY));
+
 installDiagramInteraction("source");
 installDiagramInteraction("target");
-window.addEventListener("resize", () => { resizeCanvas(); drawFunctionPlot(); });
+window.addEventListener("resize", () => { resizeCanvas(); drawFunctionPlot(); drawField(); });
 
+setTheme(document.documentElement.dataset.theme, false, false);
 calculate();
 setMainSystem("cartesian");
 resizeCanvas();
 createFunctionPlot();
+calculateField();

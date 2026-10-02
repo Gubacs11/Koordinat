@@ -1,15 +1,38 @@
 <!doctype html>
-<html lang="hu">
+<html lang="hu" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f2eddf">
+  <meta name="theme-color" content="#f2eddf" id="theme-color-meta">
   <meta name="description" content="Interaktív koordináta-átváltó és forgatható 3D függvényábrázoló.">
+  <link rel="canonical" href="https://gubacs11.github.io/Koordinat/">
+  <meta property="og:title" content="Koordináta-labor">
+  <meta property="og:description" content="Interaktív 3D koordináta-átváltó, függvényábrázoló és lineáris közelítés.">
+  <meta property="og:image" content="https://gubacs11.github.io/Koordinat/preview.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Koordináta-labor – interaktív matematikai vizualizáció">
+  <meta property="og:url" content="https://gubacs11.github.io/Koordinat/">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="hu_HU">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Koordináta-labor">
+  <meta name="twitter:description" content="Interaktív 3D koordináta-átváltó és függvényábrázoló.">
+  <meta name="twitter:image" content="https://gubacs11.github.io/Koordinat/preview.png">
   <title>Koordináta-labor</title>
+  <script>
+    (() => {
+      try {
+        const saved = localStorage.getItem("coordinate-theme");
+        const preferred = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.dataset.theme = saved || preferred;
+      } catch (_) {}
+    })();
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,650&family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=8">
+  <link rel="stylesheet" href="styles.css?v=11">
 </head>
 <body>
   <div class="noise" aria-hidden="true"></div>
@@ -18,7 +41,10 @@
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
       <span>KOORDINÁTA<span class="brand-accent">//</span>LABOR</span>
     </a>
-    <div class="header-meta"><span class="status-dot"></span> Interaktív tér</div>
+    <div class="header-actions">
+      <div class="header-meta"><span class="status-dot"></span> Interaktív tér</div>
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Sötét téma bekapcsolása" aria-pressed="false"><span aria-hidden="true">☾</span><b>Sötét</b></button>
+    </div>
   </header>
 
   <main>
@@ -154,7 +180,70 @@
             <canvas id="function-canvas" aria-label="A függvény forgatható háromdimenziós grafikonja"></canvas>
             <div class="plot-key"><span id="surface-legend"><i class="surface-key"></i>függvény</span><span id="tangent-legend" hidden><i class="plane-key"></i>lineáris közelítés</span></div>
             <div class="plot-scale" aria-hidden="true"><span>alacsony</span><i></i><span>magas</span></div>
-            <div class="plot-status" id="plot-status" aria-live="polite">Betöltés…</div>
+            <div class="plot-status" id="plot-status" aria-live="polite"><span id="plot-range">Betöltés…</span><strong id="plot-warning" hidden></strong></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="field-section" aria-labelledby="field-title">
+      <div class="function-heading">
+        <div class="panel-heading">
+          <span class="step-number">03</span>
+          <div><p class="panel-kicker">Mezők a síkon</p><h2 id="field-title">Skalár- és vektormező</h2></div>
+        </div>
+        <p>Számítsd ki a mező helyi tulajdonságait, és vizsgáld meg a teljes tartományt.</p>
+      </div>
+
+      <div class="field-lab">
+        <aside class="field-controls">
+          <div class="field-mode-switch" role="group" aria-label="Mező típusa">
+            <button type="button" data-field-mode="scalar" aria-pressed="true">Skalármező</button>
+            <button type="button" data-field-mode="vector" aria-pressed="false">Vektormező</button>
+          </div>
+
+          <div class="field-expression" id="scalar-field-controls">
+            <label for="scalar-field-input">f(x, y)</label>
+            <input id="scalar-field-input" type="text" value="sin(x) * cos(y)" autocomplete="off" spellcheck="false">
+            <small>A szín a mező értékét, a jelölt pontnál a gradiens a növekedés irányát mutatja.</small>
+          </div>
+          <div class="field-expression vector-expression" id="vector-field-controls" hidden>
+            <label for="vector-x-input">Fₓ(x, y)</label><input id="vector-x-input" type="text" value="-y" autocomplete="off" spellcheck="false">
+            <label for="vector-y-input">Fᵧ(x, y)</label><input id="vector-y-input" type="text" value="x" autocomplete="off" spellcheck="false">
+            <small>A nyilak iránya és hossza a vektormező helyi viselkedését mutatja.</small>
+          </div>
+
+          <div class="field-settings">
+            <label><span>Tartomány eleje</span><input id="field-min" type="number" value="-5" step="1"></label>
+            <label><span>Tartomány vége</span><input id="field-max" type="number" value="5" step="1"></label>
+            <label><span>Sűrűség</span><select id="field-density"><option value="12">Ritka</option><option value="18" selected>Normál</option><option value="25">Sűrű</option></select></label>
+          </div>
+
+          <div class="field-point-settings">
+            <span>Vizsgált pont</span>
+            <label>x₀ <input id="field-point-x" type="number" value="1" step="0.25"></label>
+            <label>y₀ <input id="field-point-y" type="number" value="1" step="0.25"></label>
+          </div>
+          <button class="field-calculate" id="calculate-field" type="button">Számítás és ábrázolás</button>
+          <p class="function-error" id="field-error" role="alert" hidden></p>
+
+          <div class="field-results" aria-live="polite">
+            <div><span id="field-result-label-1">f(x₀,y₀)</span><strong id="field-result-1">–</strong></div>
+            <div><span id="field-result-label-2">∇f</span><strong id="field-result-2">–</strong></div>
+            <div><span id="field-result-label-3">|∇f|</span><strong id="field-result-3">–</strong></div>
+            <div><span id="field-result-label-4">Irány</span><strong id="field-result-4">–</strong></div>
+          </div>
+        </aside>
+
+        <div class="field-visual">
+          <div class="field-toolbar">
+            <div><strong id="field-visual-title">Skalármező · f(x,y)</strong><small>Mozgasd az egeret a mező fölött a helyi értékekhez.</small></div>
+            <span id="field-hover-readout">x = 0 · y = 0 · f = 0</span>
+          </div>
+          <div class="field-canvas-wrap">
+            <canvas id="field-canvas" aria-label="A skalár- vagy vektormező kétdimenziós vizualizációja"></canvas>
+            <div class="field-color-scale" id="field-color-scale"><span>alacsony</span><i></i><span>magas</span></div>
+            <div class="plot-status field-status" id="field-status" aria-live="polite">Betöltés…</div>
           </div>
         </div>
       </div>
@@ -163,7 +252,7 @@
     <section class="results-section" aria-labelledby="results-title">
       <div class="results-heading">
         <div class="panel-heading">
-          <span class="step-number">03</span>
+          <span class="step-number">04</span>
           <div><p class="panel-kicker">Válassz útvonalat</p><h2 id="results-title">Bárhonnan bárhová</h2></div>
         </div>
         <div class="angle-switch" role="group" aria-label="Szög mértékegysége">
@@ -219,7 +308,7 @@
         </figure>
       </div>
 
-      <div class="all-results-label"><span>04</span><p>Mind a négy alak</p></div>
+      <div class="all-results-label"><span>05</span><p>Mind a négy alak</p></div>
 
       <div class="result-grid">
         <article class="result-card polar-card">
@@ -265,6 +354,6 @@
   </main>
 
   <footer><span>KOORDINÁTA//LABOR</span><p>Tanulj térben gondolkodni.</p><small>Statikus webalkalmazás · GitHub Pagesre kész</small></footer>
-  <script src="app.js?v=13"></script>
+  <script src="app.js?v=26"></script>
 </body>
 </html>
