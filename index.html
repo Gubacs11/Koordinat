@@ -4,12 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f2eddf">
-  <meta name="description" content="Interaktív Descartes-, polár-, henger- és gömbi koordináta átváltó 2D és 3D szemléltetéssel.">
+  <meta name="description" content="Interaktív koordináta-átváltó és forgatható 3D függvényábrázoló.">
   <title>Koordináta-labor</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,650&family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=3">
+  <link rel="stylesheet" href="styles.css?v=8">
 </head>
 <body>
   <div class="noise" aria-hidden="true"></div>
@@ -79,10 +79,91 @@
       </section>
     </section>
 
+    <section class="function-section" aria-labelledby="function-title">
+      <div class="function-heading">
+        <div class="panel-heading">
+          <span class="step-number">02</span>
+          <div><p class="panel-kicker">Interaktív felület</p><h2 id="function-title">3D függvényábrázoló</h2></div>
+        </div>
+        <p>Írj be egy <code>z = f(x, y)</code> függvényt, majd forgasd el a felületét.</p>
+      </div>
+
+      <div class="function-lab">
+        <aside class="function-controls">
+          <label class="expression-label" for="function-input">Függvény</label>
+          <div class="expression-field" id="expression-field">
+            <span>z =</span>
+            <input id="function-input" type="text" value="sin(sqrt(x^2 + y^2))" autocomplete="off" spellcheck="false" aria-describedby="function-help function-error">
+            <button id="plot-function" type="button">Ábrázolás</button>
+          </div>
+          <p id="function-help" class="function-help">Használható: <code>x</code>, <code>y</code>, <code>pi</code>, alapműveletek és a lenti függvények. Szorzásnál a <code>2x</code> alak is működik.</p>
+          <p id="function-error" class="function-error" role="alert" hidden></p>
+
+          <div class="math-keyboard" aria-label="Matematikai billentyűzet">
+            <button type="button" data-math="x">x</button><button type="button" data-math="y">y</button>
+            <button type="button" data-math="^2">□²</button><button type="button" data-math="sqrt()">√</button>
+            <button type="button" data-math="sin()">sin</button><button type="button" data-math="cos()">cos</button>
+            <button type="button" data-math="tan()">tan</button><button type="button" data-math="abs()">|x|</button>
+            <button type="button" data-math="exp()">eˣ</button><button type="button" data-math="log()">ln</button>
+            <button type="button" data-math="pi">π</button><button type="button" data-math="()">( )</button>
+          </div>
+
+          <div class="function-examples" aria-label="Példafüggvények">
+            <span>Próbáld ki</span>
+            <button type="button" data-function="x^2 - y^2">Nyereg</button>
+            <button type="button" data-function="sin(sqrt(x^2 + y^2))">Hullám</button>
+            <button type="button" data-function="exp(-(x^2 + y^2)/6) * cos(2x)">Dombok</button>
+          </div>
+
+          <div class="plot-settings">
+            <label><span>Tartomány eleje</span><input id="plot-min" type="number" value="-5" step="1" min="-20" max="-1"></label>
+            <label><span>Tartomány vége</span><input id="plot-max" type="number" value="5" step="1" min="1" max="20"></label>
+            <label><span>Részletesség</span><select id="plot-resolution"><option value="24">Gyors</option><option value="36" selected>Normál</option><option value="50">Részletes</option></select></label>
+          </div>
+
+          <div class="linearization-panel">
+            <label class="linearization-switch">
+              <input id="linearize-toggle" type="checkbox">
+              <span><b>Lineáris közelítés</b><small>Érintősík egy kiválasztott pontban</small></span>
+            </label>
+            <div class="linearization-settings" id="linearization-settings" hidden>
+              <label><span>x₀</span><input id="linear-x" type="number" value="0" step="0.25"></label>
+              <label><span>y₀</span><input id="linear-y" type="number" value="0" step="0.25"></label>
+              <div class="linearization-result">
+                <span>Közelítő sík</span>
+                <code id="linear-formula">L(x, y) = –</code>
+                <small id="linear-details">Az érintési pont és a gradiens itt jelenik meg.</small>
+              </div>
+              <div class="layer-switch" id="layer-switch" role="group" aria-label="Ábrázolt rétegek">
+                <span>Megjelenítés</span>
+                <div><button type="button" data-layer="both" aria-pressed="true">Együtt</button><button type="button" data-layer="surface" aria-pressed="false">Felület</button><button type="button" data-layer="plane" aria-pressed="false">Közelítő sík</button></div>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <div class="function-visual">
+          <div class="function-toolbar">
+            <div><strong id="plot-formula">z = sin(√(x² + y²))</strong><small>Húzd a forgatáshoz · görgess a nagyításhoz</small></div>
+            <div class="function-view-controls">
+              <label class="height-control"><span>Magasság</span><input id="plot-height" type="range" min="0.4" max="1.2" value="0.7" step="0.05"><output id="plot-height-value">70%</output></label>
+              <button id="reset-plot" type="button">↺ Alaphelyzet</button>
+            </div>
+          </div>
+          <div class="function-canvas-wrap">
+            <canvas id="function-canvas" aria-label="A függvény forgatható háromdimenziós grafikonja"></canvas>
+            <div class="plot-key"><span id="surface-legend"><i class="surface-key"></i>függvény</span><span id="tangent-legend" hidden><i class="plane-key"></i>lineáris közelítés</span></div>
+            <div class="plot-scale" aria-hidden="true"><span>alacsony</span><i></i><span>magas</span></div>
+            <div class="plot-status" id="plot-status" aria-live="polite">Betöltés…</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="results-section" aria-labelledby="results-title">
       <div class="results-heading">
         <div class="panel-heading">
-          <span class="step-number">02</span>
+          <span class="step-number">03</span>
           <div><p class="panel-kicker">Válassz útvonalat</p><h2 id="results-title">Bárhonnan bárhová</h2></div>
         </div>
         <div class="angle-switch" role="group" aria-label="Szög mértékegysége">
@@ -138,7 +219,7 @@
         </figure>
       </div>
 
-      <div class="all-results-label"><span>03</span><p>Mind a négy alak</p></div>
+      <div class="all-results-label"><span>04</span><p>Mind a négy alak</p></div>
 
       <div class="result-grid">
         <article class="result-card polar-card">
@@ -184,6 +265,6 @@
   </main>
 
   <footer><span>KOORDINÁTA//LABOR</span><p>Tanulj térben gondolkodni.</p><small>Statikus webalkalmazás · GitHub Pagesre kész</small></footer>
-  <script src="app.js?v=7"></script>
+  <script src="app.js?v=13"></script>
 </body>
 </html>
